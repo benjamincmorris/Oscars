@@ -1,0 +1,402 @@
+---
+title: "Oscars Statistics Project"
+author: "Benjamin Morris"
+date: "Due Monday 2015/5/11 8:30am on GitHub"
+output:
+  html_document:
+    keep_md: yes
+---
+
+
+
+In this project, I have sought to examine the potential for bias in prestige assessments in the film industry. This project examines individuals that have been nominated for and those who have won Academy Awards in either acting or writing. In particular, I seek to address prevailing myths about biases in film recognition. One such myth is that actors who win the Oscar for Best Actress are significantly younger than actors winning for the Best Actor category. Other factors of interest include measures of a film's prestige overall and the film’s production budget.	Bias is undoubtedly present in the recognition of actors’ and film makers’ accomplishments.  I have attempted to expose some of that bias by illustrating patterns that underlie one’s potential success at award ceremonies. 
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+# Load the necessary packages
+suppressPackageStartupMessages(library(rvest))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(tm))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(knitr))
+```
+
+###Scaping the Data
+
+###Data Wrangling
+
+
+####Data Before Cleaning:
+```{r, echo=FALSE}
+# Scrape the best actress data from wikipedia and make a data frame.
+actress <- html("http://en.wikipedia.org/wiki/Academy_Award_for_Best_Actress")
+actress_data <- actress %>% html_nodes("table") %>% .[[2]] %>% html_table(fill=TRUE)
+
+head.1 <- head(actress_data)
+kable(head.1, format='pandoc')
+```
+
+* (Some of) The Issues:
+    + Columns shifted over during scraping.
+    + Year cells spanned multiple rows of the original table, scraping put them in as unique rows of the Name variable. Thus we have no distinct year variable and we have extra entries in the name variable.
+    + Year variable also includes the ceremony number.
+    + The winner for a given year is denoted by being the first row of that year. We need a distinct variable.
+    + The early years of many awards allowed for more or fewer than 5 individuals to be nominated, which creates issues for subsequent coding which relies on a consistent number of rows per year.
+
+
+
+####Data After Cleaning:
+```{r, echo=FALSE, warning=FALSE}
+# Cut out the first few years of the award, prior to the 5 nomination rule.
+actress <- actress_data[-(1:42),]
+
+# Create a year variable that uses the year information from the messy data set.
+# Pull from every 6th row because that contains the year info.
+# This code was adapted from a google source.
+actress$year <- rep(actress$Year[seq(1,nrow(actress),6)], each=6)
+
+# Use the seperate command to isolate just the year portion of the varaible year. 
+# Use \\ to escape so that the open paraentheses can be called.
+actress <- separate(actress, year, c("year", "Ceremony"), sep="\\(")
+
+# Fix the shifted column names, and create a new varaible to specify which award this is.
+actress.clean <- actress %>%
+  rename(Name=Year) %>%
+  rename(Movie=Actress) %>%
+  rename(Year=year) %>% 
+  select(Year, Name, Movie) %>%
+  mutate(Award= 'Actress')
+
+# This function deletes every nth row.
+# The code from this function was adapted from a google source.
+row.del<-function(df, n)df[-(seq(n,to=nrow(df),by=n)),]
+
+# Drop the first row so that we can drop every 6th row and get rid of the now redundant date information contained within the name variable.
+actress.clean <- actress.clean[-1,]
+actress.clean <- row.del(actress.clean, 6)
+
+# Create a new variable denoting whether a nominee won the award. 
+actress.clean$Win <- c("Won","Lost","Lost","Lost","Lost")
+
+head.clean <- head(actress.clean)
+kable(head.clean, format='pandoc')
+```
+
+
+```{r, echo=FALSE}
+# The same style of data wrangling as above, but for Best Actor in a Leading Role.
+actor <- html('http://en.wikipedia.org/wiki/Academy_Award_for_Best_Actor')
+actor_data <- actor %>% html_nodes("table") %>% .[[3]] %>% html_table(fill=TRUE)
+
+actor.clean <- actor_data[-(1:39),]
+
+actor.clean$year <- rep(actor.clean$Year[seq(1,nrow(actor.clean),6)], each=6)
+actor.clean <- separate(actor.clean, year, c("year", "Ceremony"), sep="\\(")
+
+actor.clean <- actor.clean %>%
+  rename(Name=Year) %>%
+  rename(Movie=Actor) %>%
+  rename(Year=year) %>%
+  select(Year, Name, Movie) %>%
+  mutate(Award= 'Actor')
+
+actor.clean <- actor.clean[-1,]
+actor.clean <- row.del(actor.clean, 6)
+
+actor.clean$Win <- c("Won","Lost","Lost","Lost","Lost")
+```
+
+```{r, echo=FALSE}
+# The same style of data wrangling as above, but for Best Actor in a Supporting Role.
+sup.actor <- html('http://en.wikipedia.org/wiki/Academy_Award_for_Best_Supporting_Actor')
+sup_actor <- sup.actor %>% html_nodes('table') %>% .[[3]] %>% html_table(fill=TRUE)
+
+# No need to trim off the early years of the award as with the awards for leading role performances, 
+# because the award was first given in 1936 and 5 individuals were always nominated.
+
+sup.actor.clean <- sup_actor
+sup.actor.clean$year <- rep(sup.actor.clean$Year[seq(1,nrow(sup.actor.clean),6)], each=6)
+sup.actor.clean <- separate(sup.actor.clean, year, c("year", "Ceremony"), sep="\\(")
+
+sup.actor.clean <- sup.actor.clean %>%
+  rename(Name=Year) %>%
+  rename(Movie=Actor) %>%
+  rename(Year=year) %>%
+  select(Year, Name, Movie) %>%
+  mutate(Award= 'Supporting Actor')
+
+sup.actor.clean <- sup.actor.clean[-1,]
+sup.actor.clean <- row.del(sup.actor.clean, 6)
+
+sup.actor.clean$Win <- c("Won","Lost","Lost","Lost","Lost")
+```
+
+```{r, echo=FALSE}
+# Import the data for Best Actress in a Supporting Role.
+# This webpage has a table for each decade, so we first need to scrape each one.
+sup.actress <- html('http://en.wikipedia.org/wiki/Academy_Award_for_Best_Supporting_Actress')
+sup_actress_30 <- sup.actress %>% html_nodes('table') %>% .[[3]] %>% html_table(fill=TRUE)
+sup_actress_40 <- sup.actress %>% html_nodes('table') %>% .[[4]] %>% html_table(fill=TRUE)
+sup_actress_50 <- sup.actress %>% html_nodes('table') %>% .[[5]] %>% html_table(fill=TRUE)
+sup_actress_60 <- sup.actress %>% html_nodes('table') %>% .[[6]] %>% html_table(fill=TRUE)
+sup_actress_70 <- sup.actress %>% html_nodes('table') %>% .[[7]] %>% html_table(fill=TRUE)
+sup_actress_80 <- sup.actress %>% html_nodes('table') %>% .[[8]] %>% html_table(fill=TRUE)
+sup_actress_90 <- sup.actress %>% html_nodes('table') %>% .[[9]] %>% html_table(fill=TRUE)
+sup_actress_00 <- sup.actress %>% html_nodes('table') %>% .[[10]] %>% html_table(fill=TRUE)
+sup_actress_10 <- sup.actress %>% html_nodes('table') %>% .[[11]] %>% html_table(fill=TRUE)
+
+# Next, we need to combine all the decades into one data frame.
+sup_actress <- bind_rows(sup_actress_30, sup_actress_40, sup_actress_50, sup_actress_60, sup_actress_70,
+                          sup_actress_80, sup_actress_90, sup_actress_00, sup_actress_10)
+
+
+# No need to trim off the early years of the award as with the awards for leading role performances, 
+# because the award was first given in 1936 and 5 individuals were always nominated.
+
+# Extract the year data to fix the error from the web scraping
+sup_actress$year <- rep(sup_actress$Year[seq(1,nrow(sup_actress),6)], each=6)
+
+# Because there are no parentheses or other consistent character separating the year from the cermony
+# number (e.g. '19369th Academy Awards') the year names for this df cannot be cleaned in the same way
+# as previous in data sets (i.e. separating after the '(' and retaining the first variable).
+# Instead, the line below allows us to select only the first four characters of the variable,
+# which denote the year.
+sup_actress$year <- substr(sup_actress$year, 0, 4)
+
+# Renmae the columns that were unalligned due to scraping issues.
+# Create a new varaible to label this particular award
+sup_actress <- sup_actress %>%
+  rename(Name=Year) %>%
+  rename(Movie=Actress) %>%
+  rename(Year=year) %>%
+  select(Year, Name, Movie) %>%
+  mutate(Award= 'Supporting Actress')
+
+# Delete the first row, then delete every sixth row (which contain now redundent year information)
+sup_actress <- sup_actress[-1,]
+sup_actress <- row.del(sup_actress, 6)
+
+# Create the win variable.
+sup_actress$Win <- c("Won","Lost","Lost","Lost","Lost")
+```
+
+
+
+```{r, echo=FALSE}
+# The data wrangling for screenwriter oscars essentially mirrors the supporting actress category.
+writer <- html('http://en.wikipedia.org/wiki/Academy_Award_for_Best_Original_Screenplay')
+writer_data_40 <- writer %>% html_nodes("table") %>% .[[4]] %>% html_table(fill=TRUE)
+writer_data_50 <- writer %>% html_nodes("table") %>% .[[5]] %>% html_table(fill=TRUE)
+writer_data_60 <- writer %>% html_nodes("table") %>% .[[6]] %>% html_table(fill=TRUE)
+writer_data_70 <- writer %>% html_nodes("table") %>% .[[7]] %>% html_table(fill=TRUE)
+writer_data_80 <- writer %>% html_nodes("table") %>% .[[8]] %>% html_table(fill=TRUE)
+writer_data_90 <- writer %>% html_nodes("table") %>% .[[9]] %>% html_table(fill=TRUE)
+writer_data_00 <- writer %>% html_nodes("table") %>% .[[10]] %>% html_table(fill=TRUE)
+writer_data_10 <- writer %>% html_nodes("table") %>% .[[11]] %>% html_table(fill=TRUE)
+
+# Have to scrap one year where the award was not given.
+writer_data_40 <- writer_data_40[-(49:50),]
+
+# Bind all the decade tables together
+writer_data <- bind_rows(writer_data_40, writer_data_50, writer_data_60, writer_data_70, 
+          writer_data_80, writer_data_90, writer_data_00, writer_data_10)
+
+writer_data$year <- rep(writer_data$Year[seq(1,nrow(writer_data),6)], each=6)
+writer_data <- separate(writer_data, year, c("year", "Ceremony"), sep="\\(")
+
+writer_data <- writer_data %>%
+  rename(Movie=Year) %>%
+  rename(Name=Film) %>%
+  rename(Year=year) %>%
+  select(Year, Name, Movie) %>%
+  mutate(Award= 'Writer')
+
+writer_data <- writer_data[-1,]
+writer_data <- row.del(writer_data, 6)
+
+writer_data$Win <- c("Won","Lost","Lost","Lost","Lost")
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+# Create a master dataset that binds together each of the 5 award categories.
+noms <- bind_rows(actor.clean, actress.clean, sup.actor.clean, sup_actress, writer_data)
+
+# Read in a dataset that contains some information on a great deal of movies, including budget.
+budget<-read.csv('movies.csv')
+
+# Clean up the text of the movie title in both datasets so that we can join them.
+noms$Movie <- noms$Movie %>%
+  gsub(pattern = '[[:blank:]]', replacement="") %>%
+  gsub(pattern= '[[:digit:]]', replacement="") %>%
+  gsub(pattern= '[[:punct:]]', replacement="")
+
+
+budget$title <- budget$title %>%
+  gsub(pattern = '[[:blank:]]', replacement="") %>%
+  gsub(pattern= '[[:digit:]]', replacement="") %>%
+  gsub(pattern= '[[:punct:]]', replacement="")
+
+# join the two datasets
+movies <- left_join(noms, budget, by=c("Movie" = "title"))
+
+#Make the win variable into a factor for logistic regression.
+movies$Win <- as.factor(movies$Win)
+```
+
+###Regression Equation
+```{r}
+model <- glm(Win ~ budget + rating, family = binomial, data = movies)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# run a regression looking at predictors of whether a certain individual wins.
+model <- glm(Win ~ budget + rating, family = binomial, data = movies)
+
+b<-coefficients(model)
+exp(b)
+confint(model)
+```
+
+
+
+This model looked at individuals who were nominated for an Oscar for Best Actor in a Leading Role, Best Actress in a Leading Role, Best Supporting Actor, Best Supporting Actress, and Best Original Screen Play. The logistic regression attempted to predict which nominee would win the award. 
+
+The average user rating from IMDB signficantly predicted winning an Oscar. The 95% confidence intervals do not include 1, which suggests that user rating is a meaningful predictor. The coefficient for rating is 1.93 which indicates that every 1 point increase in user rating corresponds to almost two fold increase in the odds of winning an oscar if nominated. This seems sensible as user rating likely is likely influenced by the quality of the acting and of the writing. While based on a very select group of individuals' votes, the Oscars are ultimately determined by voting.
+
+A film's budget did not signficantly predict it's success at the oscars once nominated. It should be noted that budget data was missing for a great deal of the films for which individauls were nominated for oscars. It could be that the effect is there, but it is unclear in these data due to the lack of information. It could also be that budget has a greater effect on one's odds of being nominated for an Oscar to begin with, but that once nominated the budget is less influential. Similarly, there could be an issue of restricted range such that the films for which individuals are nominated for Oscars for represent a select, likely high-budget subset of all films.
+
+Initially, I was interested in using a number of other predictors in my eventual regression; however, I ran into a number of unsolvable obstacles. I wished to include information on whether or not films passed the Bechdel test; however, this information proved very difficult to integrate into my master dataset. The data with Bechdel test information I was able to find, when joined with my master dataset, described only a handful of films, so it was not included. 
+
+I was also initially interested in including information on nominees' age, gender (in behind the camera roles), and the performance of their film. This information also proved difficult to locate in a form that could be scraped easily. I had also been interested in examining the award for Best Director, but the avaialbe data was improperly formatted to allow for scraping into a usable format. 
+
+
+
+###Age
+In an attempt to examine the question of age, I was able to find data on the ages of all actors who actually won an Oscar. I scraped this data for winners in all four major acting categories and compared the age distribution of winners for each category.
+
+
+```{r, echo=FALSE, fig.height= 6.5, fig.width=8}
+# For some reason here the names of actresses and films are repeating within each cell...
+actress.age <- html("http://en.wikipedia.org/wiki/List_of_Academy_Award_Best_Actress_winners_by_age")
+actress_age <- actress.age %>% html_nodes("table") %>% .[[1]] %>% html_table()
+
+# Drop the last row which is randomly redundant / will confuse later code.
+actress_age <- actress_age[-(nrow(actress_age)),]
+
+# Tidy up the variable names, which had spaces from the wikipedia page.
+actress_age$Age <- actress_age$"Age upon\nreceiving award"
+actress_age$Year <- actress_age$"Date of award"
+
+# Get clean/ disticnt values for Age and Year.
+actress_age <- separate(actress_age, 'Age', c("Age", "blah"), sep="-")
+actress_age <- separate(actress_age, 'Year', c("blerg", "Year"), sep=",")
+actress_age <- separate(actress_age, 'Year', c("Year", "flerg"), sep="\\(")
+
+# Identify which award this was for and rename the variable name to simply subsequent binding of rows.
+actress_age <- actress_age %>%
+  select(Actress, Film, Year, Age) %>%
+  mutate(Award='Actress') %>%
+  rename(Name = Actress)
+
+
+
+# Same data scraping and wrangling procedure but for best actor data.
+actor.age <- html("http://en.wikipedia.org/wiki/List_of_Academy_Award_Best_Actor_winners_by_age")
+actor_age <- actor.age %>% html_nodes("table") %>% .[[1]] %>% html_table()
+
+
+actor_age <- actor_age[-(nrow(actor_age)),]
+actor_age$Age <- actor_age$"Age upon\nreceiving award"
+actor_age$Year <- actor_age$"Date of award"
+actor_age <- separate(actor_age, 'Age', c("Age", "blah"), sep="-")
+actor_age <- separate(actor_age, 'Year', c("blerg", "Year"), sep=",")
+actor_age <- separate(actor_age, 'Year', c("Year", "flerg"), sep="\\(")
+
+actor_age <- actor_age %>%
+  select(Actor, Film, Year, Age) %>%
+  mutate(Award='Actor') %>%
+  rename(Name = Actor)
+
+
+
+# Same procedure, but for best supporting actor data
+sup.actor.age <- html("http://en.wikipedia.org/wiki/List_of_Best_Supporting_Actor_winners_by_age")
+sup_actor_age <- sup.actor.age %>% html_nodes("table") %>% .[[1]] %>% html_table()
+sup_actor_age <- sup_actor_age[-(nrow(sup_actor_age)),]
+
+sup_actor_age$Age <- sup_actor_age$"Age upon\nreceiving award"
+sup_actor_age$Year <- sup_actor_age$"Date of award"
+sup_actor_age <- separate(sup_actor_age, 'Age', c("Age", "blah"), sep="-")
+sup_actor_age <- separate(sup_actor_age, 'Year', c("blerg", "Year"), sep=",")
+sup_actor_age <- separate(sup_actor_age, 'Year', c("Year", "flerg"), sep="\\(")
+
+sup_actor_age <- sup_actor_age %>%
+  select(Actor, Film, Year, Age) %>%
+  mutate(Award='Supporting Actor') %>%
+  rename(Name = Actor)
+
+
+
+# Lastly, same procedure but for best supporting actress data
+sup.actress.age <- html("http://en.wikipedia.org/wiki/List_of_Best_Supporting_Actress_winners_by_age")
+sup_actress_age <- sup.actress.age %>% html_nodes("table") %>% .[[1]] %>% html_table()
+
+sup_actress_age <- sup_actress_age[-(nrow(sup_actress_age)),]
+sup_actress_age$Age <- sup_actress_age$"Age upon\nreceiving award"
+sup_actress_age$Year <- sup_actress_age$"Date of award"
+sup_actress_age <- separate(sup_actress_age, 'Age', c("Age", "blah"), sep="-")
+sup_actress_age <- separate(sup_actress_age, 'Year', c("blerg", "Year"), sep=",")
+sup_actress_age <- separate(sup_actress_age, 'Year', c("Year", "flerg"), sep="\\(")
+
+sup_actress_age <- sup_actress_age %>%
+  select(Actor, Film, Year, Age) %>%
+  mutate(Award='Supporting Actress') %>%
+  rename(Name = Actor)
+
+
+
+# Bind all four award datasets together
+ages <- bind_rows(actor_age, actress_age, sup_actor_age, sup_actress_age)
+# Make Age a numeric variable.
+ages$Age <- as.numeric(ages$Age)
+
+# Create a boxplot to get a sense both of central tendency and variability.
+boxplot(ages$Age ~ ages$Award, col= c("Blue", "Red", "Blue", "Red"))
+  title(main= 'Age Distributions for Winners of the 4 Oscars for Acting', cex=1.5, font=10)
+```
+
+The boxplot suggests a clear difference in the ages at which one is likely to win an acting Oscar, depending on one's gender. It seems that women are, on average, younger when they win their Oscars than men are. As discussed above, this effect could be emerging at a number of points along the pipeline. It could be that critics are more likely to recognize (i.e. vote for) the performances of younger female actors, whereas age may be less relevant for male actors. It could also be that this bias is present during the nomination process. Lastly, it could be that the film industry is such that the roles avaialbile for female actors that are 'Oscar-worthy' are for younger characters, thus it could be an issue of on the film production side.
+
+
+####Other
+
+The main dataset created for this project treats one observation as a single nomination. That is, one individual could appear multiple times in the dataset, either across multiple years or across multiple films in the same year. It is worth noting that many films garner recognition on a number of fronts. A brief look at films that have won any Oscars at all reveals that while the vast majority of films win or are nominated for only one award, some have as many as 10 nominations.
+
+I have also included, just for fun, a table of all the films to have won 8 or more Oscars.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+best. <- html("http://en.wikipedia.org/wiki/List_of_Academy_Award-winning_films")
+best <- best. %>% html_nodes("table") %>% .[[1]] %>% html_table()
+
+best$Awards <- as.numeric(best$Awards)
+best$Nominations <- as.numeric(best$Nominations)
+
+
+ggplot(data=best, aes(x=Awards))+ geom_histogram()
+ggplot(data=best, aes(x=Nominations))+ geom_histogram()
+
+
+best_best <- best %>%
+  filter(Awards > 7)
+
+kable(best_best, format='pandoc')
+```
+
+
+##Conclusion
+
+I believe the above results suggest that bias is indeed at play in the recognition of the accopmlishments of actors and film-makers. While a large portion of my time was devoted to tidying all of the necessary data and I was not able to adress all of my questions, there seems to be a clear differential treatment of male and female actors. Production budget may be less important in determining who wins an award, however, it is hard to say whether such factors may have an effect at other points in the pipeline. 

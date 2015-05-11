@@ -1,0 +1,36 @@
+---
+title: "Oscar Search"
+runtime: shiny
+output: html_document
+---
+
+This interactive app allows users to view all the nominees for a given Academy Award in any given year. The table gives further information about the film an individual was nominated for and the winner in the category for that year. 
+
+Oscar categories included are Best Actor in a Leading Role, Best Actress in a Leading Role, Best Supporting Actor, Best Supporting Actress, and Best Original Screenplay. Possible years range from 1936- 2014. 
+
+
+```{r, echo=FALSE}
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(xtable))
+
+noms <- read.csv(file='noms.csv')
+
+inputPanel(
+  numericInput("year", label = "Year:",min = 1936, max = 2014, value= 2014, step = 1),
+
+  selectInput("award", label= 'Award Type:', choices=c('Actor', 'Actress',
+      'Supporting Actor', 'Supporting Actress', 'Writer'))
+)
+
+renderTable({
+  noms_specific <- noms %>%
+    filter(Award==input$award, Year==input$year) %>%
+    select(-X, -Award, -Year)
+  
+  xtable(noms_specific, format = 'markdown')
+})
+
+```
+
+
+
